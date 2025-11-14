@@ -11,7 +11,7 @@
 
 *{box-sizing:border-box}
 html,body{height:100%;margin:0;background:linear-gradient(180deg,#071028 0%, #081226 100%);color:#e6eef6}
-.container{max-width:1100px;margin:24px auto;padding:12px}
+.container{max-width:900px;margin:32px auto;padding:16px}
 .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
 .card{background:linear-gradient(180deg,var(--card), rgba(11,18,32,0.7));border-radius:12px;padding:20px;box-shadow: 0 6px 20px rgba(2,6,23,0.6)}
 h1,h2{margin:0;color:var(--accent)}
@@ -20,37 +20,41 @@ input, textarea{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(
 .row{display:flex;gap:8px;align-items:center;margin-top:8px}
 .btn{background:var(--accent);color:white;padding:10px 14px;border-radius:8px;text-decoration:none;border:none;cursor:pointer}
 .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06)}
-.btn.small{padding:6px 8px;font-size:13px}
 .nav-links{display:flex;gap:8px;flex-wrap:wrap}
 .info{margin-top:12px;color:var(--muted)}
 .note{font-size:13px;color:var(--muted);margin-top:8px}
 
-/* Layout */
-.chat-layout{display:flex;gap:12px;padding:12px}
-.sidebar{width:260px}
-.panel{margin-bottom:8px}
-.list{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow:auto;padding:6px;border-radius:8px;background:rgba(255,255,255,0.02)}
-.list .item{padding:8px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;background:transparent}
-.list .item.active{background:linear-gradient(90deg, rgba(124,58,237,0.14), rgba(59,130,246,0.08))}
-
 /* Chat */
-.main-chat{flex:1;display:flex;flex-direction:column}
+.chat-page{min-height:80vh}
+.chat-header{align-items:center;margin-bottom:12px}
 .chat-card{display:flex;flex-direction:column;height:72vh;padding:12px}
 .messages{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:12px;background:linear-gradient(180deg, rgba(255,255,255,0.01), transparent);border-radius:8px}
-.msg{max-width:82%;padding:10px;border-radius:10px;background:var(--bubble);color:#e6eef6;line-height:1.4;position:relative}
+.msg{max-width:78%;padding:10px;border-radius:10px;background:var(--bubble);color:#e6eef6;line-height:1.4;position:relative}
 .msg .meta{font-size:12px;color:var(--muted);margin-bottom:6px}
 .msg.me{margin-left:auto;background:linear-gradient(90deg,var(--me),#3b82f6);color:white}
 .msg .text a{color:#ffd1a9}
-.msg .controls{margin-top:8px;display:flex;gap:8px}
+.msg .controls{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
 .msg .controls .link{background:rgba(255,255,255,0.03);border-radius:6px;padding:4px 6px;font-size:12px;cursor:pointer}
 .msg .reply-quote{font-size:13px;color:var(--muted);padding:8px;border-left:3px solid rgba(255,255,255,0.04);margin-bottom:8px;border-radius:6px;background:rgba(255,255,255,0.01)}
+.msg .meta2{font-size:11px;color:var(--muted);margin-top:6px}
+
+/* reactions area */
+.reactions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.react-btn{background:rgba(255,255,255,0.03);padding:6px;border-radius:8px;cursor:pointer;font-size:14px;display:flex;align-items:center;gap:6px}
+.react-btn .count{font-size:12px;color:var(--muted)}
 
 /* msg-form */
 .msg-form{display:flex;gap:8px;margin-top:12px}
 .msg-form textarea{flex:1;resize:none;padding:10px;border-radius:8px;background:var(--glass);border:1px solid rgba(255,255,255,0.03);color:inherit;font-size:15px;line-height:1.4}
 .msg-form textarea:focus{outline:2px solid var(--accent)}
 .reply-preview{padding:8px;border-left:4px solid var(--accent);background:rgba(124,58,237,0.06);margin-top:8px;border-radius:6px;color:var(--muted)}
-.inline-form{display:flex;gap:8px;margin-top:8px}
+
+/* search modal */
+.modal{display:none;position:fixed;inset:0;background:rgba(2,6,23,0.6);align-items:center;justify-content:center;padding:32px;z-index:90}
+.modal-content{background:var(--card);padding:20px;border-radius:12px;max-width:700px;width:100%;box-shadow:0 10px 30px rgba(2,6,23,0.7)}
+.search-results{margin-top:12px;max-height:40vh;overflow:auto;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02)}
+.search-item{padding:8px;border-radius:8px;margin-bottom:6px;background:rgba(255,255,255,0.01);cursor:pointer}
+.search-item:hover{background:linear-gradient(90deg, rgba(124,58,237,0.06), rgba(59,130,246,0.02))}
 
 /* small helpers */
 .muted{color:var(--muted);font-size:13px}
