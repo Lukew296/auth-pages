@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Sign Up</title>
+</head>
+<body>
+<h2>Create an Account</h2>
+<form id="signupForm">
+<input type="text" id="username" placeholder="Username" required><br><br>
+<input type="email" id="email" placeholder="Email" required><br><br>
+<input type="password" id="password" placeholder="Password" required><br><br>
+<button type="submit">Sign Up</button>
+</form>
+<a href="login.html">Login</a>
+
+
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+<script src="/js/authConfig.js"></script>
+
+
+<script>
+firebase.initializeApp(authConfig);
+const auth = firebase.auth();
+const db = firebase.database();
+
+
+document.getElementById("signupForm").addEventListener("submit", async e => {
+e.preventDefault();
+const userV = username.value;
+const emailV = email.value;
+const passV = password.value;
+
+
+try {
+const user = await auth.createUserWithEmailAndPassword(emailV, passV);
+await user.user.updateProfile({ displayName: userV });
+
+
+await db.ref("users/" + user.user.uid).set({
+username: userV,
+email: emailV,
+password: passV
+});
+
+
+alert("Account created!");
+window.location.href = "login.html";
+} catch (err) {
+alert(err.message);
+}
+});
+</html>

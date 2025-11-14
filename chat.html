@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+
+
+// Require login
+onAuthStateChanged(auth, user => {
+if (!user) {
+window.location.href = "index.html";
+} else {
+document.getElementById("welcome").innerHTML = `Logged in as <b>${user.displayName}</b>`;
+}
+});
+
+
+// Send message
+window.sendMsg = () => {
+const user = auth.currentUser;
+const msg = document.getElementById("msg").value;
+if (!msg.trim()) return;
+
+
+push(ref(db, "messages"), {
+user: user.displayName || user.email,
+text: msg,
+timestamp: Date.now()
+});
+
+
+document.getElementById("msg").value = "";
+};
+
+
+// Receive messages
+onChildAdded(ref(db, "messages"), snapshot => {
+const data = snapshot.val();
+const box = document.getElementById("chatBox");
+
+
+const time = new Date(data.timestamp).toLocaleTimeString();
+
+
+box.innerHTML += `
+<div style="padding:6px;margin-bottom:6px;border-radius:6px;background:#f0f0f0;">
+<b>${data.user}</b> <small>${time}</small><br>
+<span>${md(data.text)}</span>
+</div>
+`;
+
+
+box.scrollTop = box.scrollHeight;
+});
+
+
+// Logout
+window.logout = async () => {
+await signOut(auth);
+window.location.href = "index.html";
+};
+</script>
+</head>
+<body>
+<h1>Chat</h1>
+<p id="welcome"></p>
+<button onclick="logout()">Logout</button>
+
+
+<div id="chatBox" style="width:90%;height:300px;border:1px solid #aaa;overflow-y:auto;padding:10px;"></div>
+
+
+<br>
+<textarea id="msg" placeholder="Write a message..." style="width:90%;height:60px;"></textarea><br>
+<button onclick="sendMsg()">Send</button>
+</body>
+</html>
