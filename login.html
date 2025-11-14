@@ -1,39 +1,56 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-<title>Login</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Log In</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-<h2>Login</h2>
-<form id="loginForm">
-<input type="email" id="email" placeholder="Email" required><br><br>
-<input type="password" id="password" placeholder="Password" required><br><br>
-<button type="submit">Login</button>
-</form>
-<a href="signup.html">Create Account</a>
+  <main class="container">
+    <header class="top">
+      <h1>Log In</h1>
+    </header>
 
+    <section class="card">
+      <form id="loginForm">
+        <label>
+          Email
+          <input id="email" type="email" required />
+        </label>
+        <label>
+          Password
+          <input id="password" type="password" required />
+        </label>
 
-<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
-<script src="/js/authConfig.js"></script>
+        <div class="row">
+          <button class="btn" type="submit">Log In</button>
+          <a class="btn ghost" href="signup.html">Create account</a>
+        </div>
+      </form>
 
+      <div id="msg" class="info"></div>
+    </section>
+  </main>
 
-<script>
-firebase.initializeApp(authConfig);
-const auth = firebase.auth();
+  <script type="module">
+    import { signIn } from './auth.js';
+    const form = document.getElementById('loginForm');
+    const msg = document.getElementById('msg');
 
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
 
-document.getElementById("loginForm").addEventListener("submit", async e => {
-e.preventDefault();
-
-
-try {
-await auth.signInWithEmailAndPassword(email.value, password.value);
-window.location.href = "chat.html";
-} catch (err) {
-alert(err.message);
-}
-});
-</script>
+      try {
+        await signIn({ email, password });
+        msg.textContent = 'Logged in. Redirecting to chat...';
+        setTimeout(()=> location.href='chat.html', 700);
+      } catch (err) {
+        msg.textContent = 'Error: ' + err.message;
+      }
+    });
+  </script>
 </body>
 </html>
