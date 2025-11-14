@@ -2,20 +2,21 @@
 import { chatDb } from './firebase-chat.js';
 import {
   ref, push, set, onChildAdded, query, limitToLast, onChildChanged,
-  orderByChild, onValue, update, get
+  orderByChild, onValue, update, get, orderByKey
 } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js";
 
 /*
- Data structure (Realtime DB - DB #2)
- /rooms/{roomId} -> { name, createdAt }
- /rooms/{roomId}/channels/{channelId} -> { name, createdAt }
- /rooms/{roomId}/channels/{channelId}/messages/{messageId} -> {
-    uid, username, text, ts, editedAt?, parentId?
- }
+ Single global chat:
+ /messages/{messageId} -> { uid, username, text, ts, editedAt?, parentId? }
+ /messages/{messageId}/reactions/{emoji}/{uid} : true
 */
 
-/* ---------- Small utilities ---------- */
-function escapeHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+/* ---------- Utilities ---------- */
+function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+export function _renderPlain(s){ // helper for search result text snippet (plain)
+  return escapeHtml((s||'').split('\n').slice(0,3).join(' '));
+}
 
 function renderMarkdown(text) {
   const esc = escapeHtml;
@@ -30,157 +31,57 @@ function renderMarkdown(text) {
 }
 function fmtTime(ts){ return new Date(ts).toLocaleString(); }
 
-/* ---------- Module state ---------- */
+/* ---------- State ---------- */
 let state = {
   user: null,
-  currentRoomId: null,
-  currentChannelId: null,
   replyTo: null,
   listeners: { messages: null }
 };
 
-/* ---------- DOM refs ---------- */
-const roomsListEl = () => document.getElementById('roomsList');
-const channelsListEl = () => document.getElementById('channelsList');
+/* DOM refs */
 const messagesEl = () => document.getElementById('messages');
 const msgForm = () => document.getElementById('msgForm');
 const msgInput = () => document.getElementById('msgInput');
 const replyPreviewEl = () => document.getElementById('replyPreview');
-const msgTemplate = () => document.getElementById('msg-template');
+const tpl = () => document.getElementById('msg-template');
 
-/* ---------- Rooms & Channels ---------- */
-export async function createRoom({ name }) {
-  const roomsRef = ref(chatDb, 'rooms');
-  const newRef = push(roomsRef);
-  await set(newRef, { name, createdAt: Date.now() });
-  // will appear via realtime listener
-}
+/* Emoji set — large set requested */
+const EMOJIS = ["👍","❤️","😂","😮","😢","😡","🔥","🎉","👏","🙏","👀","🚀","😅","🤣","😎","😴","🙌","🤯","💀","😇"];
 
-export async function createChannel(name) {
-  if (!state.currentRoomId) throw new Error('No room selected');
-  const channelsRef = ref(chatDb, `rooms/${state.currentRoomId}/channels`);
-  const newRef = push(channelsRef);
-  await set(newRef, { name, createdAt: Date.now() });
-}
-
-/* ---------- UI rendering for rooms/channels ---------- */
-function clearChildren(el){ while(el.firstChild) el.removeChild(el.firstChild); }
-
-function renderRooms(rooms) {
-  const el = roomsListEl();
-  clearChildren(el);
-  Object.entries(rooms || {}).forEach(([id, r]) => {
-    const div = document.createElement('div');
-    div.className = 'item' + (id === state.currentRoomId ? ' active' : '');
-    div.textContent = r.name || ('Room ' + id);
-    div.addEventListener('click', () => selectRoom(id, r));
-    el.appendChild(div);
-  });
-}
-
-function renderChannels(channels) {
-  const el = channelsListEl();
-  clearChildren(el);
-  Object.entries(channels || {}).forEach(([id, c]) => {
-    const div = document.createElement('div');
-    div.className = 'item' + (id === state.currentChannelId ? ' active' : '');
-    div.textContent = c.name || ('Channel ' + id);
-    div.addEventListener('click', () => selectChannel(id, c));
-    el.appendChild(div);
-  });
-}
-
-/* ---------- Selection ---------- */
-async function selectRoom(id, roomObj) {
-  state.currentRoomId = id;
-  state.currentChannelId = null;
-  // update UI
-  // load channels list by reading once and setting up listener for that path
-  const channelsRef = ref(chatDb, `rooms/${id}/channels`);
-  onValue(channelsRef, (snap) => {
-    renderChannels(snap.val() || {});
-  });
-  // auto-select first channel if exists
-  const snap = await get(channelsRef);
-  const val = snap.val();
-  if (val) {
-    const firstId = Object.keys(val)[0];
-    selectChannel(firstId, val[firstId]);
-  } else {
-    // update room title via callback if present
-    if (opts && typeof opts.onRoomChange === 'function') opts.onRoomChange(roomObj, null);
-  }
-  renderRoomsListActive();
-  notifyRoomChange();
-}
-
-function renderRoomsListActive(){
-  const items = roomsListEl().children;
-  for (const it of items) {
-    it.classList.toggle('active', it.textContent === (state.currentRoomId ? document.querySelector(`#roomsList .item.active`) : false));
-  }
-}
-
-function notifyRoomChange(){
-  if (typeof opts.onRoomChange === 'function') {
-    const room = state.currentRoomId ? currentRoomsCache[state.currentRoomId] : null;
-    const channel = state.currentChannelId ? currentChannelsCache[state.currentRoomId]?.[state.currentChannelId] : null;
-    opts.onRoomChange(room, channel);
-  }
-}
-
-/* ---------- Channels ---------- */
-async function selectChannel(channelId, channelObj) {
-  state.currentChannelId = channelId;
-  // stop old message listener if any
-  if (state.listeners.messages) {
-    // no direct off API used; we switch reference: old listener will stop when element removed by SDK GC
-  }
-  // render active classes
-  Array.from(channelsListEl().children).forEach(ch => {
-    ch.classList.toggle('active', ch.textContent === channelObj.name);
-  });
-
-  // listen messages for this channel
-  listenMessages(state.currentRoomId, state.currentChannelId);
-  notifyRoomChange();
-}
-
-/* ---------- Messages ---------- */
-let currentMessagesQuery = null;
-function listenMessages(roomId, channelId) {
-  const container = messagesEl();
-  clearChildren(container);
-  state.replyTo = null;
-  replyPreviewEl().style.display = 'none';
-
-  if (!roomId || !channelId) return;
-
-  const messagesRef = ref(chatDb, `rooms/${roomId}/channels/${channelId}/messages`);
-  // order by ts
+/* ---------- Initialize & message listeners ---------- */
+export function init({ user }) {
+  state.user = user || JSON.parse(localStorage.getItem('bv_session') || 'null');
+  // listen for messages (last 500)
+  const messagesRef = ref(chatDb, 'messages');
   const q = query(messagesRef, orderByChild('ts'), limitToLast(500));
-  // initial load & updates
+
   onChildAdded(q, (snap) => {
     const data = snap.val();
     data._id = snap.key;
-    appendMessage(data, container);
-    container.scrollTop = container.scrollHeight;
+    appendMessage(data);
+    // auto-scroll to bottom
+    const m = messagesEl();
+    m.scrollTop = m.scrollHeight;
   });
+
   onChildChanged(q, (snap) => {
     const data = snap.val();
     data._id = snap.key;
     updateMessageInDOM(data);
   });
+
+  wireMessageForm();
 }
 
-/* DOM helpers: append, update, find */
+/* ---------- Append / Update message DOM ---------- */
 function findMsgElById(id) {
   return messagesEl().querySelector(`.msg[data-id="${id}"]`);
 }
 
-function appendMessage(msg, container) {
-  const tpl = msgTemplate().content.cloneNode(true);
-  const el = tpl.querySelector('.msg');
+async function appendMessage(msg) {
+  const container = messagesEl();
+  const node = tpl().content.cloneNode(true);
+  const el = node.querySelector('.msg');
   el.dataset.id = msg._id;
 
   const meta = el.querySelector('.meta');
@@ -189,31 +90,31 @@ function appendMessage(msg, container) {
   // reply quote
   const replyQuote = el.querySelector('.reply-quote');
   if (msg.parentId) {
-    // fetch parent message to show quote (best-effort)
-    get(ref(chatDb, `rooms/${state.currentRoomId}/channels/${state.currentChannelId}/messages/${msg.parentId}`))
-      .then(s => {
-        const p = s.val();
-        if (p) {
-          replyQuote.style.display = 'block';
-          const t = (p.text || '').split('\n').slice(0,2).join(' ');
-          replyQuote.innerHTML = `<strong>${escapeHtml(p.username)}</strong>: ${escapeHtml(t)}${(p.text && p.text.length > t.length) ? ' …' : ''}`;
-          // clicking the quote will scroll to original if present
-          replyQuote.addEventListener('click', () => {
-            const target = findMsgElById(msg.parentId);
-            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          });
-        }
-      });
-  } else {
-    replyQuote.style.display = 'none';
-  }
+    try {
+      const s = await get(ref(chatDb, `messages/${msg.parentId}`));
+      const p = s.val();
+      if (p) {
+        replyQuote.style.display = 'block';
+        const t = (p.text || '').split('\n').slice(0,2).join(' ');
+        replyQuote.innerHTML = `<strong>${escapeHtml(p.username)}</strong>: ${escapeHtml(t)}${(p.text && p.text.length > t.length) ? ' …' : ''}`;
+        replyQuote.addEventListener('click', () => {
+          const target = findMsgElById(msg.parentId);
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      } else replyQuote.style.display = 'none';
+    } catch (e) { replyQuote.style.display = 'none'; }
+  } else replyQuote.style.display = 'none';
 
   const textDiv = el.querySelector('.text');
   textDiv.innerHTML = renderMarkdown(msg.text);
 
-  // controls
+  const meta2 = el.querySelector('.meta2');
+  meta2.textContent = '';
+
+  // controls: reply, edit (if owner), react (emoji picker)
   const controls = el.querySelector('.controls');
-  // reply button
+  controls.innerHTML = '';
+
   const replyBtn = document.createElement('span');
   replyBtn.className = 'link';
   replyBtn.textContent = 'Reply';
@@ -224,23 +125,28 @@ function appendMessage(msg, container) {
   });
   controls.appendChild(replyBtn);
 
-  // if message belongs to current user, add edit button
   if (state.user && msg.uid === state.user.uid) {
     const editBtn = document.createElement('span');
     editBtn.className = 'link';
     editBtn.textContent = 'Edit';
-    editBtn.addEventListener('click', () => {
-      openEditUI(msg, el);
-    });
+    editBtn.addEventListener('click', () => openEditUI(msg, el));
     controls.appendChild(editBtn);
   }
 
-  // mark as mine
+  // emoji quick add UI (show minimal set + more on click)
+  const reactContainer = el.querySelector('.reactions');
+  reactContainer.innerHTML = ''; // will fill later
+
+  // We'll render the reaction buttons by reading reactions for this message
+  renderReactions(msg._id, reactContainer);
+
+  // attach click-to-scroll if message authored by me mark
   if (state.user && msg.uid === state.user.uid) el.classList.add('me');
 
   container.appendChild(el);
 }
 
+/* update existing message DOM after edit */
 function updateMessageInDOM(msg) {
   const el = findMsgElById(msg._id);
   if (!el) return;
@@ -248,17 +154,118 @@ function updateMessageInDOM(msg) {
   meta.textContent = `${msg.username} • ${fmtTime(msg.ts)}${msg.editedAt ? ' • edited' : ''}`;
   const textDiv = el.querySelector('.text');
   textDiv.innerHTML = renderMarkdown(msg.text);
+  // re-render reactions
+  const reactContainer = el.querySelector('.reactions');
+  renderReactions(msg._id, reactContainer);
+}
+
+/* ---------- Reactions handling ---------- */
+function renderReactions(messageId, container) {
+  // Listen to reactions for this particular message (one-time fetch then onValue)
+  const reactionsRef = ref(chatDb, `messages/${messageId}/reactions`);
+  onValue(reactionsRef, (snap) => {
+    const val = snap.val() || {};
+    container.innerHTML = '';
+    // compute counts per emoji
+    const counts = {};
+    Object.entries(val).forEach(([emoji, users]) => {
+      counts[emoji] = users ? Object.keys(users).length : 0;
+    });
+    // Render each emoji that has counts
+    Object.keys(counts).sort((a,b) => counts[b]-counts[a]).forEach(emoji => {
+      const btn = document.createElement('button');
+      btn.className = 'react-btn';
+      btn.innerHTML = `<span class="emoji">${emoji}</span> <span class="count">${counts[emoji]}</span>`;
+      btn.addEventListener('click', async () => {
+        await toggleReaction(messageId, emoji);
+      });
+      container.appendChild(btn);
+    });
+
+    // small quick-add row for popular emojis (shows all EMOJIS as small clickable)
+    const picker = document.createElement('div');
+    picker.style.display = 'flex';
+    picker.style.gap = '6px';
+    picker.style.marginTop = '6px';
+    EMOJIS.slice(0,8).forEach(e => {
+      const p = document.createElement('button');
+      p.className = 'react-btn';
+      p.style.padding = '6px';
+      p.textContent = e;
+      p.addEventListener('click', async () => { await toggleReaction(messageId, e); });
+      picker.appendChild(p);
+    });
+    // "more" opens full picker
+    const more = document.createElement('button');
+    more.className = 'react-btn';
+    more.textContent = '⋯';
+    more.addEventListener('click', () => openFullEmojiPicker(messageId, container));
+    picker.appendChild(more);
+
+    container.appendChild(picker);
+  });
+}
+
+async function toggleReaction(messageId, emoji) {
+  if (!state.user) return;
+  const uid = state.user.uid;
+  const path = `messages/${messageId}/reactions/${encodeURIComponent(emoji)}/${uid}`;
+  const nodeRef = ref(chatDb, path);
+  try {
+    const snap = await get(nodeRef);
+    if (snap.exists()) {
+      // remove reaction
+      await update(ref(chatDb, `messages/${messageId}/reactions/${encodeURIComponent(emoji)}`), { [uid]: null });
+    } else {
+      // add reaction
+      await set(nodeRef, true);
+    }
+  } catch (e) {
+    console.error('Reaction error', e);
+  }
+}
+
+function openFullEmojiPicker(messageId, container) {
+  // render a simple overlay picker
+  const overlay = document.createElement('div');
+  overlay.style.position = 'absolute';
+  overlay.style.left = '12px';
+  overlay.style.top = '100%';
+  overlay.style.padding = '8px';
+  overlay.style.display = 'grid';
+  overlay.style.gridTemplateColumns = 'repeat(8, 32px)';
+  overlay.style.gap = '6px';
+  overlay.style.background = 'var(--card)';
+  overlay.style.border = '1px solid rgba(255,255,255,0.04)';
+  overlay.style.borderRadius = '8px';
+  overlay.style.zIndex = 60;
+
+  EMOJIS.forEach(e => {
+    const b = document.createElement('button');
+    b.className = 'react-btn';
+    b.style.padding = '6px';
+    b.textContent = e;
+    b.addEventListener('click', async () => {
+      await toggleReaction(messageId, e);
+      overlay.remove();
+    });
+    overlay.appendChild(b);
+  });
+
+  container.appendChild(overlay);
+  // close when clicking outside
+  document.addEventListener('click', function onDocClick(ev) {
+    if (!overlay.contains(ev.target)) { overlay.remove(); document.removeEventListener('click', onDocClick); }
+  });
 }
 
 /* ---------- Edit UI ---------- */
 function openEditUI(msg, el) {
   const textDiv = el.querySelector('.text');
   const controls = el.querySelector('.controls');
-  // hide original text and controls
   textDiv.style.display = 'none';
   controls.style.display = 'none';
 
-  // create edit box
   const textarea = document.createElement('textarea');
   textarea.value = msg.text || '';
   textarea.rows = 3;
@@ -286,8 +293,7 @@ function openEditUI(msg, el) {
     const newText = textarea.value.trim();
     if (newText === '') return;
     const updates = { text: newText, editedAt: Date.now() };
-    await update(ref(chatDb, `rooms/${state.currentRoomId}/channels/${state.currentChannelId}/messages/${msg._id}`), updates);
-    // cleanup UI
+    await update(ref(chatDb, `messages/${msg._id}`), updates);
     wrapper.remove();
     textDiv.style.display = '';
     controls.style.display = '';
@@ -300,7 +306,7 @@ function openEditUI(msg, el) {
   });
 }
 
-/* ---------- Reply Preview ---------- */
+/* ---------- Reply preview ---------- */
 function showReplyPreview(replyObj) {
   const el = replyPreviewEl();
   if (!replyObj) { el.style.display = 'none'; el.innerHTML = ''; return; }
@@ -313,11 +319,10 @@ function showReplyPreview(replyObj) {
   });
 }
 
-/* ---------- Sending messages ---------- */
+/* ---------- Sending messages (multiline support) ---------- */
 export async function sendMessage(text) {
   if (!state.user) throw new Error('Not authenticated');
-  if (!state.currentRoomId || !state.currentChannelId) throw new Error('Pick a room & channel');
-  const messagesRef = ref(chatDb, `rooms/${state.currentRoomId}/channels/${state.currentChannelId}/messages`);
+  const messagesRef = ref(chatDb, 'messages');
   const newRef = push(messagesRef);
   const now = Date.now();
   await set(newRef, {
@@ -327,15 +332,14 @@ export async function sendMessage(text) {
     ts: now,
     parentId: state.replyTo ? state.replyTo.id : null
   });
-  // clear reply
   state.replyTo = null;
   showReplyPreview(null);
 }
 
-/* ---------- Wire up message form (multiline support) ---------- */
 function wireMessageForm() {
   const form = msgForm();
   const input = msgInput();
+  // Enter to send (Shift+Enter newline)
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -352,53 +356,49 @@ function wireMessageForm() {
       input.value = '';
     } catch (err) {
       console.error(err);
+      alert('Send failed: ' + err.message);
     }
   });
 }
 
-/* ---------- Rooms listener ---------- */
-let currentRoomsCache = {};
-let currentChannelsCache = {};
-let opts = {};
-
-export function init(options = {}) {
-  opts = options || {};
-  state.user = options.user || JSON.parse(localStorage.getItem('bv_session') || 'null');
-  // Rooms listener
-  const roomsRef = ref(chatDb, 'rooms');
-  onChildAdded(roomsRef, (snap) => {
-    currentRoomsCache[snap.key] = snap.val();
-    renderRooms(currentRoomsCache);
+/* ---------- Message search (client-side) ---------- */
+/*
+  Implementation:
+  - For the simplicity and realtime constraints we fetch the last N messages (500) and filter client-side.
+  - searchMessages(query) returns array of matching message objects.
+*/
+export async function searchMessages(queryStr) {
+  const q = (queryStr||'').trim().toLowerCase();
+  if (!q) return [];
+  const messagesRef = ref(chatDb, 'messages');
+  // fetch last 1000 messages ordered by ts
+  const snap = await get(query(messagesRef, orderByChild('ts'), limitToLast(1000)));
+  const val = snap.val() || {};
+  const arr = Object.entries(val).map(([id,m]) => ({ _id: id, ...m }));
+  const results = arr.filter(m => {
+    if (!m) return false;
+    const text = (m.text||'').toLowerCase();
+    const user = (m.username||'').toLowerCase();
+    // emoji search matches emoji char
+    if (text.includes(q) || user.includes(q)) return true;
+    // search in reactions: if q is an emoji or name, check reactions
+    if (m.reactions) {
+      const emojis = Object.keys(m.reactions).map(decodeURIComponent);
+      if (emojis.some(e => e.includes(q) || (e === q))) return true;
+      // also check users who reacted (username substring) — left out for performance
+    }
+    return false;
   });
-  onChildChanged(roomsRef, (snap) => {
-    currentRoomsCache[snap.key] = snap.val();
-    renderRooms(currentRoomsCache);
-  });
-
-  // Also load existing rooms at once
-  onValue(roomsRef, (snap) => {
-    currentRoomsCache = snap.val() || {};
-    renderRooms(currentRoomsCache);
-  });
-
-  // Watch channels cache per room dynamically (keeps UI updated)
-  // We'll use onValue for channels when a room is selected (see selectRoom)
-
-  // wire message form
-  wireMessageForm();
-
-  // initial channels/rooms are empty until created; you can create via form
+  // sort by ts desc
+  results.sort((a,b) => b.ts - a.ts);
+  return results;
 }
 
-/* ---------- Helpers for DOM update when room/channel change ---------- */
-export async function selectRoomById(roomId) {
-  if (!roomId) return;
-  // fetch room
-  const r = await get(ref(chatDb, `rooms/${roomId}`));
-  selectRoom(roomId, r.val());
+/* ---------- Scroll to message helper ---------- */
+export function scrollToMessage(messageId) {
+  const el = findMsgElById(messageId);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
-export async function selectChannelById(roomId, channelId) {
-  if (!roomId || !channelId) return;
-  const c = await get(ref(chatDb, `rooms/${roomId}/channels/${channelId}`));
-  selectChannel(channelId, c.val());
-}
+
+/* ---------- Expose some helpers for chat.html script ---------- */
+export { renderMarkdown as _renderMarkdown, renderMarkdown, EMOJIS };
