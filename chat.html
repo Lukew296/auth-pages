@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Global Chat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="container chat-page">
+    <header class="top chat-header">
+      <div>
+        <h2 id="roomTitle">Global Chat</h2>
+        <div id="userInfo" class="muted"></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="searchBtn" class="btn ghost">🔍 Search</button>
+        <button id="logoutBtn" class="btn ghost">Logout</button>
+      </div>
+    </header>
+
+    <section class="card chat-card">
+      <div id="messages" class="messages" aria-live="polite"></div>
+
+      <div id="replyPreview" class="reply-preview" style="display:none"></div>
+
+      <form id="msgForm" class="msg-form" aria-label="Send message">
+        <textarea id="msgInput" rows="2" placeholder="Type a message — Markdown supported. Shift+Enter = new line" autocomplete="off"></textarea>
+        <button class="btn" type="submit">Send</button>
+      </form>
+    </section>
+  </main>
+
+  <!-- Message template -->
+  <template id="msg-template">
+    <div class="msg">
+      <div class="meta"></div>
+      <div class="reply-quote" style="display:none"></div>
+      <div class="text"></div>
+      <div class="meta2"></div>
+      <div class="controls"></div>
+      <div class="reactions"></div>
+    </div>
+  </template>
+
+  <!-- Search modal -->
+  <div id="searchModal" class="modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="searchTitle">
+      <h3 id="searchTitle">Search Messages</h3>
+      <input id="searchInput" placeholder="Search text, username, or emoji..." />
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button id="searchRunBtn" class="btn">Search</button>
+        <button id="searchCloseBtn" class="btn ghost">Close</button>
+      </div>
+      <div id="searchResults" class="search-results"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { requireAuth, logout } from './auth.js';
+    import * as Chat from './chat.js';
+
+    const user = requireAuth();
+    document.getElementById('userInfo').textContent = `Signed in as ${user.username} (${user.email})`;
+    document.getElementById('logoutBtn').addEventListener('click', () => logout());
+
+    // Initialize chat with user
+    Chat.init({ user });
+
+    // Search modal handlers
+    const searchBtn = document.getElementById('searchBtn');
+    const modal = document.getElementById('searchModal');
+    const closeBtn = document.getElementById('searchCloseBtn');
+    const runBtn = document.getElementById('searchRunBtn');
+    const input = document.getElementById('searchInput');
+
+    searchBtn.addEventListener('click', () => {
+      modal.style.display = 'block';
+      modal.setAttribute('aria-hidden','false');
+      input.focus();
+    });
+    closeBtn.addEventListener('click', () => {
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden','true');
+      document.getElementById('searchResults').innerHTML = '';
+      input.value = '';
+    });
+    runBtn.addEventListener('click', async () => {
+      const q = input.value.trim();
+      document.getElementById('searchResults').innerHTML = 'Searching...';
+      const res = await Chat.searchMessages(q);
+      const out = res.length ? res.map(m => `<div class="search-item" data-id="${m._id}"><strong>${m.username}</strong>: ${Chat._renderPlain(m.text)} <div class="muted">${new Date(m.ts).toLocaleString()}</div></div>`).join('') : '<div class="muted">No results</div>';
+      document.getElementById('searchResults').innerHTML = out;
+      // allow clicking to jump to message (if present)
+      document.querySelectorAll('.search-item').forEach(el => {
+        el.addEventListener('click', () => {
+          const id = el.dataset.id;
+          Chat.scrollToMessage(id);
+          modal.style.display = 'none';
+          modal.setAttribute('aria-hidden','true');
+        });
+      });
+    });
+  </script>
+</body>
+</html>
